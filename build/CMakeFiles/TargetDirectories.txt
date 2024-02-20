@@ -1,0 +1,3 @@
+/Users/ryan/Documents/Masterthesis/Octree/build/CMakeFiles/octree.dir
+/Users/ryan/Documents/Masterthesis/Octree/build/CMakeFiles/edit_cache.dir
+/Users/ryan/Documents/Masterthesis/Octree/build/CMakeFiles/rebuild_cache.dir
