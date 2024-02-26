@@ -23,11 +23,11 @@ set(CMAKE_CXX_COMPILER_SYSROOT "/Library/Developer/CommandLineTools/SDKs/MacOSX1
 set(CMAKE_COMPILER_SYSROOT "/Library/Developer/CommandLineTools/SDKs/MacOSX14.sdk/usr")
 
 
-set(CMAKE_AR "/usr/bin/ar")
+set(CMAKE_AR "/Library/Developer/CommandLineTools/usr/bin/ar")
 set(CMAKE_CXX_COMPILER_AR "/opt/homebrew/Cellar/gcc@11/11.4.0/bin/gcc-ar-11")
-set(CMAKE_RANLIB "/usr/bin/ranlib")
+set(CMAKE_RANLIB "/Library/Developer/CommandLineTools/usr/bin/ranlib")
 set(CMAKE_CXX_COMPILER_RANLIB "/opt/homebrew/Cellar/gcc@11/11.4.0/bin/gcc-ranlib-11")
-set(CMAKE_LINKER "/usr/bin/ld")
+set(CMAKE_LINKER "/Library/Developer/CommandLineTools/usr/bin/ld")
 set(CMAKE_MT "")
 set(CMAKE_TAPI "/Library/Developer/CommandLineTools/usr/bin/tapi")
 set(CMAKE_COMPILER_IS_GNUCXX 1)

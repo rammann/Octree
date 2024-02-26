@@ -796,10 +796,13 @@ namespace OrthoTree
     }
 
 
-    inline Node& createChild(Node& nodeParent, child_id_type iChild, morton_node_id_type_cref kChild) noexcept
+    inline Node& createChild(Node& nodeParent, child_id_type iChild, morton_node_id_type_cref kChild)noexcept
     {
       assert(iChild < this->m_nChild);
-      nodeParent.AddChild(kChild);
+      if(!nodeParent.HasChild(kChild)){
+        nodeParent.AddChildInOrder(kChild);
+      }
+      
 
       auto& nodeChild = m_nodes[kChild];  
       if constexpr (std::is_integral_v<geometry_type>)
@@ -1108,8 +1111,12 @@ namespace OrthoTree
   public: // Getters
 
     inline auto const& GetNodes() const noexcept { return m_nodes; }
+    inline auto & GetNodetoChange(morton_node_id_type_cref key) { return cont_at(m_nodes, key); }
     inline auto const& GetNode(morton_node_id_type_cref key) const noexcept { return cont_at(m_nodes, key); }
-    inline auto const& GetParent(morton_node_id_type_cref key) const noexcept {return cont_at(m_nodes, key).m_parent;}
+    inline auto const& GetParent(morton_node_id_type_cref key) const noexcept {
+      return cont_at(m_nodes, key).m_parent;
+      //return key>>3;
+    }
     inline auto const& GetBox() const noexcept { return m_box; }
     inline auto GetDepthMax() const noexcept { return m_nDepthMax; }
     inline auto GetResolutionMax() const noexcept { return m_nRasterResolutionMax; }
@@ -1189,8 +1196,8 @@ namespace OrthoTree
                   std::cout<<")]"<<std::endl;
 
                   // Parent
-                  std::cout<<std::string(4*int(GetDepth(key)),' ')<<"Parent "<< node.m_parent<<std::endl;
-
+                  std::cout<<std::string(4*int(GetDepth(key)),' ')<<"Parent "<< this->GetParent(key)<<std::endl;
+                  //std::cout<<std::string(4*int(GetDepth(key)),' ')<<"Parent from calc "<< (key>>3)<<std::endl;
 
 
                   // Coarse Nbr
@@ -1231,7 +1238,17 @@ namespace OrthoTree
                 });
       return;
     }
-    // returns the colleagues(same depth neighbours) of node_c(key)
+
+    std::vector<morton_node_id_type> GetLeafNodes(morton_node_id_type kRoot=GetRootKey()) const noexcept{
+      std::vector<morton_node_id_type> leafnodes = {};
+      VisitNodes(kRoot, [&](morton_node_id_type_cref key, Node const& node)
+      {
+        if(!node.IsAnyChildExist()){leafnodes.push_back(key);}
+      });
+      return leafnodes;
+    }
+
+    // returns the colleagues(same depth neighbours) of node_c(key) ONLY 3D CASE
     std::vector<morton_node_id_type_cref> GetColleagues(morton_node_id_type_cref key) const noexcept{
       auto aid = this->MortonDecode(key,GetDepth(key));
       std::vector<morton_node_id_type_cref> neighbours={};
@@ -1246,9 +1263,27 @@ namespace OrthoTree
       return neighbours;
     }
 
+    // returns all possible colleagues of the node (don't necessarily exist)
+    std::vector<morton_node_id_type_cref> GetPotentialColleagues(morton_node_id_type_cref key) const noexcept{
+      auto aid = this->MortonDecode(key,GetDepth(key));
+      std::vector<morton_node_id_type_cref> neighbours={};
+      for(int x=-1;x<2;++x){
+        for(int y=-1;y<2;++y){
+          for(int z=-1;z<2;++z){
+            auto newaid = std::array{aid[0]+x, aid[1]+y, aid[2]+z};
+            if (not(newaid[0]<0 || newaid[0]>=std::pow(2,GetDepth(key)) || newaid[1]<0 || newaid[1]>=std::pow(2,GetDepth(key)) || newaid[2]<0 || newaid[2]>=std::pow(2,GetDepth(key)))){
+              auto nbr = this->MortonEncode(newaid)+std::pow(8,GetDepth(key));
+              neighbours.push_back(nbr);
+            }
+          } 
+        }
+      }
+      return neighbours;
+    }
+
     std::vector<morton_node_id_type_cref> GetCoarseNeighbours(morton_node_id_type_cref key) const noexcept{
       auto node = this->GetNode(key);
-      vector<morton_node_id_type> coarse_neighbours{};
+      vector<morton_node_id_type_cref> coarse_neighbours{};
       auto parent_colleagues = this->GetColleagues(this->GetParent(key));
       for(auto parent_neighbour:parent_colleagues){
         //check if it is a leaf node and if it overlaps with the box
@@ -1257,6 +1292,52 @@ namespace OrthoTree
       }
       return coarse_neighbours;
     }
+
+    // find the next existing ancestor of m_nodes(key)
+    morton_node_id_type_cref GetNextAncestor(morton_node_id_type_cref key) const noexcept{
+      if(m_nodes.contains(key)){
+        std::cout<<"      found ancestor "<<key<<std::endl;
+        return key;
+      }
+      else if(key==0){
+        std::cout<<"      Root needs to be refinded "<<std::endl;
+        return 1;
+      }
+      else{
+        std::cout<<"      Going up one level -> "<<(key>>3)<<std::endl;
+        return GetNextAncestor(key>>3);
+      }
+      
+    }
+
+    
+    
+
+
+  
+    /*
+    std::vector<morton_node_id_type_cref> GetBalancedSubtree(morton_node_id_type_cref kRoot=GetRootKey()) const noexcept{
+      // iterate through level from leaf nodes upwards
+      for(depth_type l=this->m_nDepthMax; l>0;--l){
+        // Q holds the nodes at level l
+        std::vector<morton_node_id_type_cref> Q;
+        Q.reserve(std::pow(std::pow(2,3)),l);
+        std::copy_if(std::begin(this->GetNodes()), std::end(this->GetNodes()), std::begin(Q),[&](morton_grid_id_type_cref morton_id)
+        {
+          return morton_id >= std::pow(std::pow(2,3),l);
+        });
+        // Sort(Q) should already be true 
+        
+        // T = {x in Q | S(x) not in T}
+        std::vector<morton_node_id_type_cref> T;
+        T.reserve(std::pow(std::pow(2,3)),l-1);
+        std::copy_if(std::begin(Q), std::end(Q), std::begin(T), [&](morton_grid_id_type_cref morton_id)
+        {
+          return morton_id;
+        });
+    }
+    */
+    
     /*============================================================================================================================================*/
 
 
@@ -1641,6 +1722,8 @@ namespace OrthoTree
     void addNodes(Node& nodeParent, morton_node_id_type_cref kParent, LocationIterator& itEndPrev, LocationIterator const& itEnd, morton_grid_id_type_cref idLocationBegin, depth_type nDepthRemain) noexcept
     {
       autoc nElement = std::distance(itEndPrev, itEnd);
+
+      // reached leaf node -> add point ids to leaf nodes vid
       if (nElement < this->m_nElementMax || nDepthRemain == 0)
       {
         nodeParent.vid.resize(nElement);
@@ -1671,6 +1754,10 @@ namespace OrthoTree
         this->addNodes(nodeChild, kChild, itEndPrev, itEndActual, idLocationBeginChild, nDepthRemain);
       }
     }
+    
+    /*=============================================================================================*/
+    
+    /*=============================================================================================*/
 
 
   public: // Create
@@ -1713,8 +1800,6 @@ namespace OrthoTree
       std::sort(eps, std::begin(aidLocation), std::end(aidLocation), [&](autoc& idL, autoc& idR) { return idL.second < idR.second; });
       auto itBegin = std::begin(aidLocation);
       tree.addNodes(nodeRoot, kRoot, itBegin, std::end(aidLocation), morton_node_id_type{ 0 }, nDepthMax);
-
-      // Need to implement balancing refinement
     }
 
 
@@ -1809,6 +1894,86 @@ namespace OrthoTree
 
       return this->Insert(id, ptNew, fInsertToLeaf);
     }
+    /*======================================================*/
+    void BalanceOctree(span<vector_type const> const& vpt={}){
+      std::queue<morton_node_id_type_cref> unprocessed_nodes={};
+      std::vector<morton_node_id_type_cref> leaf_nodes=this->GetLeafNodes();
+      std::sort(std::begin(leaf_nodes),std::end(leaf_nodes), [](morton_node_id_type_cref l, morton_node_id_type_cref r){return l>r;});
+      for(auto leaf:leaf_nodes) unprocessed_nodes.push(leaf);
+      
+      // for each unprocessed node, check that its coarse neighbours exists
+      
+      while(!unprocessed_nodes.empty()){    
+        bool processed = true;
+        std::cout<<"Processing node: "<<unprocessed_nodes.front()<<std::endl;
+        std::vector<morton_node_id_type_cref> potential_neighbours=this->GetPotentialColleagues(unprocessed_nodes.front());
+        for(auto pnbr:potential_neighbours){
+          // if the neighbour is a sibling (same parent), go to next potential neighbour
+          // if the parent of the potential neighbour exists, go to next potential neighbour
+          std::cout<<"  processing nbr "<<pnbr;
+          
+          if((pnbr>>3) == this->GetParent(unprocessed_nodes.front()))
+          {
+            std::cout<<" - share partent -         done!"<<std::endl;
+            continue;
+          } 
+          
+          else if(this->GetNodes().contains(pnbr>>3)){
+            std::cout<<" - coarse partent exists - done!"<<std::endl;
+            continue;
+          }
+          else{
+            std::cout<<" - finding ancestor "<<std::endl;
+            morton_node_id_type_cref ancestor=this->GetNextAncestor(pnbr); 
+            processed=false;
+            std::cout<<"      refining "<<ancestor;
+            //auto nAncestorNode = this->GetNodetoChange(ancestor);
+            vector<morton_node_id_type> nNewNodes = this->refineNode(this->GetNodetoChange(ancestor), ancestor, vpt); 
+            std::cout<<" creating nodes ";
+            for(auto node:nNewNodes){
+              unprocessed_nodes.push(node);
+              std::cout<<node<<" ";
+            }
+            std::cout<<std::endl;
+          }          
+        }
+        if(processed)unprocessed_nodes.pop();
+      }
+    }
+
+    vector<morton_node_id_type_cref> refineNode(Node& nodeParent, morton_node_id_type_cref kParent, span<vector_type const> const& vpt){
+      
+      const depth_type old_depth = this->GetDepth(kParent);
+      const depth_type new_depth = old_depth+1;
+      const depth_type nDepthRemain = this->GetDepthMax() - new_depth;
+      autoc shift = nDepthRemain * nDimension;
+      auto aidLocation = vector<std::pair<entity_id_type, morton_grid_id_type>>(nodeParent.vid.size());
+      autoc flagParent = kParent << nDimension;
+
+      vector<morton_node_id_type> nNewNodes={};
+      
+      std::transform(nodeParent.vid.begin(), nodeParent.vid.end(), aidLocation.begin(), [&](autoc id) -> std::pair<entity_id_type, morton_grid_id_type>
+      {
+        return { id, (this->getLocationId(vpt[id]))>>shift };
+      });
+
+      for(int idChild=0;idChild<std::pow(2,nDimension);++idChild){
+        morton_grid_id_type const kChild = flagParent | idChild;
+        Node& nodeChild = this->createChild(nodeParent, idChild, kChild);
+        nodeChild.m_parent=kParent;
+        std::cout<<"Adding vids ";
+        for(auto nLocPair:aidLocation){
+          if(nLocPair.second==kChild){
+            nodeChild.vid.push_back(nLocPair.first);
+            std::cout<<nLocPair.first<<" ";
+          }
+        }
+        std::cout<<std::endl;
+        nNewNodes.push_back(kChild);
+      }
+      return nNewNodes;
+    }
+    /*======================================================*/
 
 
   public: // Search functions
