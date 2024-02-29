@@ -763,6 +763,18 @@ namespace OrthoTree
       return aid;
     }
 
+    constexpr array<grid_id_type, nDimension> getRelativeGridIdPoint(vector_type const& pe_r) const noexcept
+    {
+      auto aid = array<grid_id_type, nDimension>{};
+      for (dim_type iDimension = 0; iDimension < nDimension; ++iDimension)
+      {
+        autoc local_comp = adaptor_type::point_comp_c(pe_r, iDimension);
+        auto raster_id = static_cast<double>(local_comp) * this->m_aRasterizer[iDimension];
+        aid[iDimension] = std::min<grid_id_type>(this->m_idSlotMax, static_cast<grid_id_type>(raster_id));
+      }
+      return aid;
+    }
+
 
     constexpr array<array<grid_id_type, nDimension>, 2> getGridIdBox(box_type const& box) const noexcept
     {
@@ -1296,48 +1308,19 @@ namespace OrthoTree
     // find the next existing ancestor of m_nodes(key)
     morton_node_id_type_cref GetNextAncestor(morton_node_id_type_cref key) const noexcept{
       if(m_nodes.contains(key)){
-        std::cout<<"      found ancestor "<<key<<std::endl;
+        //std::cout<<"      found ancestor "<<key<<std::endl;
         return key;
       }
       else if(key==0){
-        std::cout<<"      Root needs to be refinded "<<std::endl;
+        //std::cout<<"      Root needs to be refinded "<<std::endl;
         return 1;
       }
       else{
-        std::cout<<"      Going up one level -> "<<(key>>3)<<std::endl;
+        //std::cout<<"      Going up one level -> "<<(key>>3)<<std::endl;
         return GetNextAncestor(key>>3);
       }
       
     }
-
-    
-    
-
-
-  
-    /*
-    std::vector<morton_node_id_type_cref> GetBalancedSubtree(morton_node_id_type_cref kRoot=GetRootKey()) const noexcept{
-      // iterate through level from leaf nodes upwards
-      for(depth_type l=this->m_nDepthMax; l>0;--l){
-        // Q holds the nodes at level l
-        std::vector<morton_node_id_type_cref> Q;
-        Q.reserve(std::pow(std::pow(2,3)),l);
-        std::copy_if(std::begin(this->GetNodes()), std::end(this->GetNodes()), std::begin(Q),[&](morton_grid_id_type_cref morton_id)
-        {
-          return morton_id >= std::pow(std::pow(2,3),l);
-        });
-        // Sort(Q) should already be true 
-        
-        // T = {x in Q | S(x) not in T}
-        std::vector<morton_node_id_type_cref> T;
-        T.reserve(std::pow(std::pow(2,3)),l-1);
-        std::copy_if(std::begin(Q), std::end(Q), std::begin(T), [&](morton_grid_id_type_cref morton_id)
-        {
-          return morton_id;
-        });
-    }
-    */
-    
     /*============================================================================================================================================*/
 
 
@@ -1895,80 +1878,114 @@ namespace OrthoTree
       return this->Insert(id, ptNew, fInsertToLeaf);
     }
     /*======================================================*/
+
+    /*
+    Balance the tree by filling all leaf nodes into a queue and making sure their coarse neighbours exist. If they don't
+    the next existing leaf ancestor is refined, its new children inserted into the queue and the the leaf node is checked again.
+    If all coarse neighbours exist, the leaf node is popped out of queue.
+    */ 
+
     void BalanceOctree(span<vector_type const> const& vpt={}){
+
+      std::cout<< "Starting Tree Balancing" << std::endl << "--------------------------------" << std::endl;
+      
+      /// Put leaf Nodes in a queue with the deepest leaves at the front of the queue
       std::queue<morton_node_id_type_cref> unprocessed_nodes={};
       std::vector<morton_node_id_type_cref> leaf_nodes=this->GetLeafNodes();
       std::sort(std::begin(leaf_nodes),std::end(leaf_nodes), [](morton_node_id_type_cref l, morton_node_id_type_cref r){return l>r;});
       for(auto leaf:leaf_nodes) unprocessed_nodes.push(leaf);
       
-      // for each unprocessed node, check that its coarse neighbours exists
-      
+      /// Continue the refinement until the queue is empty
       while(!unprocessed_nodes.empty()){    
+        
+        std::cout<< "Processing node: " << unprocessed_nodes.front() << std::endl << std::endl;
+
+        /// boolean value to determine if the node has all coarse neighbours 
         bool processed = true;
-        std::cout<<"Processing node: "<<unprocessed_nodes.front()<<std::endl;
+        
+        /// Gather all potential neighbours of the first node in the queue
         std::vector<morton_node_id_type_cref> potential_neighbours=this->GetPotentialColleagues(unprocessed_nodes.front());
+        
+        /// Loop over the potential neighbours to check if their parent exist or if their next ancestor needs to be refined
         for(auto pnbr:potential_neighbours){
-          // if the neighbour is a sibling (same parent), go to next potential neighbour
-          // if the parent of the potential neighbour exists, go to next potential neighbour
-          std::cout<<"  processing nbr "<<pnbr;
+          //std::cout<< "    Checking potential neighbour " << pnbr;
           
-          if((pnbr>>3) == this->GetParent(unprocessed_nodes.front()))
-          {
-            std::cout<<" - share partent -         done!"<<std::endl;
+          /// If the neighbour shares the parent, its a sibling node -> done
+          if((pnbr>>3) == this->GetParent(unprocessed_nodes.front())){
+            //std::cout<< ", is a sibling " <<std::endl;
             continue;
           } 
           
+          /// Check if the potential neighbour's parent (aka the coarse neighbour) exists
           else if(this->GetNodes().contains(pnbr>>3)){
-            std::cout<<" - coarse partent exists - done!"<<std::endl;
+            //std::cout<<", coarse partent exists "<<std::endl;
             continue;
           }
+
+          /// If the coarse neighbour doesn't exists, the next ancestor is found and refined
           else{
-            std::cout<<" - finding ancestor "<<std::endl;
-            morton_node_id_type_cref ancestor=this->GetNextAncestor(pnbr); 
+
+            /// neighbouring node needs to be refined and this node needs to be checked again
             processed=false;
-            std::cout<<"      refining "<<ancestor;
-            //auto nAncestorNode = this->GetNodetoChange(ancestor);
+
+            /// Finding next existing ancestor and refining it
+            morton_node_id_type_cref ancestor=this->GetNextAncestor(pnbr); 
+            //std::cout<<", coarse neighbour doesn't exist - next ancestor is " << ancestor <<" - refining" << std::endl;
             vector<morton_node_id_type> nNewNodes = this->refineNode(this->GetNodetoChange(ancestor), ancestor, vpt); 
-            std::cout<<" creating nodes ";
+
+            // New nodes need to be pushed into the queue
             for(auto node:nNewNodes){
               unprocessed_nodes.push(node);
-              std::cout<<node<<" ";
             }
-            std::cout<<std::endl;
           }          
         }
         if(processed)unprocessed_nodes.pop();
       }
     }
-
+    /*
+    Function that refines the nodeParent into its children and sorts the ids amound the children.
+    */
     vector<morton_node_id_type_cref> refineNode(Node& nodeParent, morton_node_id_type_cref kParent, span<vector_type const> const& vpt){
       
-      const depth_type old_depth = this->GetDepth(kParent);
-      const depth_type new_depth = old_depth+1;
+      /// Calculate the bitshift for the new leaf nodes
+      const depth_type new_depth = this->GetDepth(kParent)+1;
       const depth_type nDepthRemain = this->GetDepthMax() - new_depth;
       autoc shift = nDepthRemain * nDimension;
+
+      /// Get information from the parent node
+      autoc parentbox_origin = nodeParent.box.Min;
       auto aidLocation = vector<std::pair<entity_id_type, morton_grid_id_type>>(nodeParent.vid.size());
       autoc flagParent = kParent << nDimension;
 
+      
       vector<morton_node_id_type> nNewNodes={};
       
+      /// save {point_id, node_key} tuple in "aidLocation"
       std::transform(nodeParent.vid.begin(), nodeParent.vid.end(), aidLocation.begin(), [&](autoc id) -> std::pair<entity_id_type, morton_grid_id_type>
       {
-        return { id, (this->getLocationId(vpt[id]))>>shift };
+        autoc gridid = this->getRelativeGridIdPoint(AD::subtract(vpt[id],parentbox_origin));
+        autoc childid = this->MortonEncode(gridid)>>shift;
+        return { id, (childid + flagParent)};
       });
 
+      /// Parent Node's vid needs to be cleared to avoid double counting, the vids are always saved in leaf nodes
+      nodeParent.vid={};
+
+      /// iteration over the new leaf nodes
       for(int idChild=0;idChild<std::pow(2,nDimension);++idChild){
+
+        /// calculate child ids
         morton_grid_id_type const kChild = flagParent | idChild;
         Node& nodeChild = this->createChild(nodeParent, idChild, kChild);
         nodeChild.m_parent=kParent;
-        std::cout<<"Adding vids ";
+
+        /// Fill vids into corresponding leaf node
         for(auto nLocPair:aidLocation){
           if(nLocPair.second==kChild){
             nodeChild.vid.push_back(nLocPair.first);
-            std::cout<<nLocPair.first<<" ";
           }
         }
-        std::cout<<std::endl;
+        
         nNewNodes.push_back(kChild);
       }
       return nNewNodes;
@@ -2117,995 +2134,6 @@ namespace OrthoTree
 
 
 
-  // OrthoTreeBoundingBox: Non-owning container which spatially organize bounding box ids in N dimension space into a hash-table by Morton Z order. 
-  // nSplitStrategyAdditionalDepth: if (nSplitStrategyAdditionalDepth > 0) Those items which are not fit in the child nodes may be stored in the children/grand-children instead of the parent.
-  template<dim_type nDimension, typename vector_type, typename box_type, typename adaptor_type = AdaptorGeneral<nDimension, vector_type, box_type, double>, typename geometry_type = double, depth_type nSplitStrategyAdditionalDepth = 2>
-  class OrthoTreeBoundingBox : public OrthoTreeBase<nDimension, vector_type, box_type, adaptor_type, geometry_type>
-  {
-  protected:
-    using base = OrthoTreeBase<nDimension, vector_type, box_type, adaptor_type, geometry_type>;
-    using EntityDistance = typename base::EntityDistance;
-    using BoxDistance = typename base::BoxDistance;
-
-  public:
-    using AD = typename base::AD;
-    using morton_grid_id_type = typename base::morton_grid_id_type;
-    using morton_grid_id_type_cref = typename base::morton_grid_id_type_cref;
-    using morton_node_id_type = typename base::morton_node_id_type;
-    using morton_node_id_type_cref = typename base::morton_node_id_type_cref;
-    using max_element_type = typename base::max_element_type;
-    using child_id_type = typename base::child_id_type;
-
-    using Node = typename base::Node;
-
-    static constexpr max_element_type max_element_default = 21;
-
-  private: // Aid functions
-
-    struct Location
-    {
-      entity_id_type id;
-      morton_grid_id_type idMin;
-      depth_type depth;
-
-      constexpr auto operator < (Location const& idLocationR) const
-      {
-        if (depth == idLocationR.depth)
-          return idMin < idLocationR.idMin;
-        else if (depth < idLocationR.depth)
-        {
-          autoc shift = (idLocationR.depth - depth) * nDimension;
-          autoc aidRS = idLocationR.idMin >> shift;
-          if (idMin == aidRS)
-            return true;
-
-          return idMin < aidRS;
-        }
-        else
-        {
-          autoc shift = (depth - idLocationR.depth) * nDimension;
-          autoc aidLS = idMin >> shift;
-          if (idLocationR.idMin == aidLS)
-            return false;
-
-          return aidLS < idLocationR.idMin;
-        }
-      }
-    };
-
-    using LocationContainer = vector<Location>;
-    using LocationIterator = typename LocationContainer::iterator;
-
-    static constexpr child_id_type getIdChildAtDepth(Location const& loc, depth_type depthCheck, morton_node_id_type_cref idLocationCurDepth) noexcept
-    {
-      assert(depthCheck <= loc.depth);
-      autoc idGridCurDepth = loc.idMin >> ((loc.depth - depthCheck) * nDimension);
-      return base::convertMortonIdToChildId(idGridCurDepth - idLocationCurDepth);
-    }
-
-
-    void addNodes(Node& nodeParent, morton_node_id_type_cref kParent, LocationIterator& itEndPrev, LocationIterator const& itEnd, morton_grid_id_type_cref idLocationBegin, depth_type nDepthRemain) noexcept
-    {
-      autoc nElement = std::distance(itEndPrev, itEnd);
-      if (nElement < this->m_nElementMax || nDepthRemain == 0)
-      {
-        if (nElement == 0)
-          return;
-
-        nodeParent.vid.resize(nElement);
-        std::transform(itEndPrev, itEnd, begin(nodeParent.vid), [](autoc& item) { return item.id; });
-        itEndPrev = itEnd;
-        return;
-      }
-
-      depth_type depthCheck = this->m_nDepthMax - nDepthRemain;
-      if (itEndPrev->depth == depthCheck)
-      {
-        auto it = itEndPrev;
-        itEndPrev = std::partition_point(it, itEnd, [&](autoc& idLocation) { return idLocation.depth == it->depth; });
-        autoc nElementCur = static_cast<int>(std::distance(it, itEndPrev));
-
-        nodeParent.vid.resize(nElementCur);
-        std::transform(it, itEndPrev, std::begin(nodeParent.vid), [](autoc& item) { return item.id; });
-      }
-
-      ++depthCheck;
-      --nDepthRemain;
-
-      autoc shift = nDepthRemain * nDimension;
-      autoc nLocationStep = morton_grid_id_type{ 1 } << shift;
-      autoc flagParent = kParent << nDimension;
-      autoc idLocationCurDepth = idLocationBegin >> shift;
-
-      while (itEndPrev != itEnd)
-      {
-        autoc idChildActual = getIdChildAtDepth(*itEndPrev, depthCheck, idLocationCurDepth);
-        autoc itEndActual = std::partition_point(itEndPrev, itEnd, [&](autoc& loc)
-        {
-          autoc idChild = getIdChildAtDepth(loc, depthCheck, idLocationCurDepth);
-          return idChildActual == idChild;
-        });
-
-        autoc mChildActual = morton_grid_id_type(idChildActual);
-        morton_grid_id_type const kChild = flagParent | mChildActual;
-        morton_grid_id_type const idLocationBeginChild = idLocationBegin + mChildActual * nLocationStep;
-
-        auto& nodeChild = this->createChild(nodeParent, idChildActual, kChild);
-        nodeChild->m_parent=kParent;
-        this->addNodes(nodeChild, kChild, itEndPrev, itEndActual, idLocationBeginChild, nDepthRemain);
-      }
-    }
-
-
-    void split(array<array<grid_id_type, nDimension>, 2> const& aidBoxGrid, size_t idLoc, LocationContainer& vLocation, LocationContainer * pvLocationAdditional) const noexcept
-    {
-      depth_type nDepth = vLocation[idLoc].depth + nSplitStrategyAdditionalDepth;
-      if (nDepth > this->m_nDepthMax)
-        nDepth = this->m_nDepthMax;
-
-      autoc nDepthRemain = static_cast<depth_type>(this->m_nDepthMax - nDepth);
-      autoc nStepGrid = static_cast<grid_id_type>(pow_ce(2, nDepthRemain));
-
-      auto aMinGridList = array<array<grid_id_type, 3>, nDimension>{};
-      uint64_t nBoxByGrid = 1;
-      for (dim_type iDim = 0; iDim < nDimension; ++iDim)
-      {
-        grid_id_type const nGridSplitFirst = (aidBoxGrid[0][iDim] / nStepGrid) + grid_id_type{ 1 };
-        grid_id_type const nGridSplitLast = (aidBoxGrid[1][iDim] / nStepGrid);
-        grid_id_type const nMinGridList = (nGridSplitLast < nGridSplitFirst ? 0 : (nGridSplitLast - nGridSplitFirst + 1)) + 1;
-        nBoxByGrid *= nMinGridList;
-        if (nBoxByGrid >= this->m_nChild)
-          return;
-
-        aMinGridList[iDim] = { aidBoxGrid[0][iDim], nGridSplitFirst, nGridSplitLast + 1 };
-      }
-
-      auto vaidMinGrid = vector<array<grid_id_type, nDimension>>{};
-      auto aidGrid = array<grid_id_type, nDimension>{};
-      vaidMinGrid.reserve(nBoxByGrid);
-      base::template constructGridIdRec<nDimension>(aMinGridList, aidGrid, vaidMinGrid, nStepGrid);
-      
-      autoc nBox = vaidMinGrid.size();
-      autoc shift = nDepthRemain * nDimension;
-
-
-      // First element into idLoc
-      vLocation[idLoc].depth = nDepth;
-      vLocation[idLoc].idMin = base::MortonEncode(vaidMinGrid[0]) >> shift;
-
-      size_t nSize = 0;
-      autoc nBoxAdd = nBox - 1;
-      if (pvLocationAdditional)
-      {
-        pvLocationAdditional->resize(nBox - 1);
-      }
-      else
-      {
-        nSize = vLocation.size();
-        vLocation.resize(nSize + nBoxAdd);
-        pvLocationAdditional = &vLocation;
-      }
-
-      LOOPIVDEP
-      for (size_t iBox = 0; iBox < nBoxAdd; ++iBox)
-      {
-        auto& loc = pvLocationAdditional->at(nSize + iBox);
-        loc.id = idLoc;
-        loc.depth = nDepth;
-        loc.idMin = base::MortonEncode(vaidMinGrid[iBox + 1]) >> shift;
-      }
-    }
-
-
-    void setLocation(box_type const& box, size_t idLoc, LocationContainer& vLocation, vector<LocationContainer>* pvvLocationAdditional = nullptr) const noexcept
-    {
-      autoc aidBoxGrid = this->getGridIdBox(box);
-
-      auto& loc = vLocation[idLoc];
-      loc.id = idLoc;
-      loc.depth = this->m_nDepthMax;
-
-      loc.idMin = base::MortonEncode(aidBoxGrid[0]);
-      autoc idMax = base::MortonEncode(aidBoxGrid[1]);
-      if (loc.idMin == idMax)
-        return;
-
-      autoc idMin = loc.idMin;
-      for (auto flagDiffOfLocation = loc.idMin ^ idMax; base::IsValidKey(flagDiffOfLocation); flagDiffOfLocation >>= nDimension, --loc.depth)
-        loc.idMin >>= nDimension;
-
-      if constexpr (nSplitStrategyAdditionalDepth > 0)
-      {
-        autoc nDepthRemain = this->m_nDepthMax - loc.depth;
-        if (base::IsValidKey((idMax - idMin) >> (nDepthRemain * nDimension - 1)))
-          return; // all nodes are touched, it is leaved.
-
-        this->split(aidBoxGrid, idLoc, vLocation, pvvLocationAdditional ? &pvvLocationAdditional->at(idLoc) : nullptr);
-      }
-    }
-
-  public: // Create
-
-    // Ctors
-    OrthoTreeBoundingBox() = default;
-    OrthoTreeBoundingBox(span<box_type const> const& vBox, depth_type nDepthMax, std::optional<box_type> const& oBoxSpace = std::nullopt, max_element_type nElementMaxInNode = max_element_default) noexcept
-    {
-      Create(*this, vBox, nDepthMax, oBoxSpace, nElementMaxInNode);
-    }
-
-    // Create
-    template<typename execution_policy_type = std::execution::unsequenced_policy>
-    static void Create(OrthoTreeBoundingBox& tree, span<box_type const> const& vBox, depth_type nDepthMaxIn = 0, std::optional<box_type> const& oBoxSpace = std::nullopt, max_element_type nElementMaxInNode = max_element_default) noexcept
-    {
-      autoc boxSpace = oBoxSpace.has_value() ? *oBoxSpace : AD::box_of_boxes(vBox);
-      autoc n = vBox.size();
-      autoc nDepthMax = nDepthMaxIn == 0 ? base::EstimateMaxDepth(n, nElementMaxInNode) : nDepthMaxIn;
-      tree.Init(boxSpace, nDepthMax, nElementMaxInNode);
-
-      base::reserveContainer(tree.m_nodes, base::EstimateNodeNumber(n, nDepthMax, nElementMaxInNode));
-      if (n == 0)
-        return;
-
-      autoc kRoot = base::GetRootKey();
-      auto& nodeRoot = cont_at(tree.m_nodes, kRoot);
-
-      autoc vid = base::generatePointId(n);
-
-      auto epf = execution_policy_type{}; // GCC 11.3
-      auto aLocation = LocationContainer(n);
-      aLocation.reserve(nSplitStrategyAdditionalDepth > 0 ? n * std::min<size_t>(10, base::m_nChild * nSplitStrategyAdditionalDepth) : n);
-      if constexpr (nSplitStrategyAdditionalDepth == 0
-        || std::is_same<execution_policy_type, std::execution::unsequenced_policy>::value
-        || std::is_same<execution_policy_type, std::execution::sequenced_policy>::value
-        )
-      {
-        std::for_each(epf, std::begin(vid), std::end(vid), [&tree, &vBox, &aLocation](autoc id)
-        {
-          tree.setLocation(vBox[id], id, aLocation);
-        });
-      }
-      else
-      {
-        auto vAddtional = vector<LocationContainer>(n);
-        std::for_each(epf, std::begin(vid), std::end(vid), [&tree, &vBox, &aLocation, &vAddtional](autoc id)
-        {
-          tree.setLocation(vBox[id], id, aLocation, &vAddtional);
-        });
-
-        auto vAddtionalSize = vector<size_t>(n);
-        auto epe = execution_policy_type{};
-        std::transform_exclusive_scan(epe, std::begin(vAddtional), std::end(vAddtional), std::begin(vAddtionalSize),
-          n,
-          std::plus<size_t>(),
-          [](autoc& vAdd) { return vAdd.size(); }
-        );
-
-        aLocation.resize(vAddtionalSize.back() + vAddtional.back().size());
-        auto epf2 = execution_policy_type{}; // GCC 11.3
-        std::for_each(epf2, std::begin(vid), std::end(vid), [&aLocation, &vAddtionalSize, &vAddtional](autoc& id)
-        {
-          if (vAddtional[id].empty())
-            return;
-
-          std::copy(std::begin(vAddtional[id]), std::end(vAddtional[id]), std::next(std::begin(aLocation), vAddtionalSize[id]));
-        });
-      }
-
-      auto eps = execution_policy_type{}; // GCC 11.3
-      std::sort(eps, std::begin(aLocation), std::end(aLocation));
-
-      auto itBegin = std::begin(aLocation);
-      tree.addNodes(nodeRoot, kRoot, itBegin, std::end(aLocation), morton_node_id_type{ 0 }, nDepthMax);
-      if constexpr (nSplitStrategyAdditionalDepth > 0)
-      {
-        // Eliminate duplicates. Not all sub-nodes will be created due to the nElementMaxInNode, which cause duplicates in the parent nodes.
-        auto epsp = execution_policy_type{}; // GCC 11.3
-        std::for_each(epsp, std::begin(tree.m_nodes), std::end(tree.m_nodes), [](auto& pairKeyNode)
-        {
-          auto& node = pairKeyNode.second;
-          std::ranges::sort(node.vid);
-          node.vid.erase(std::unique(std::begin(node.vid), std::end(node.vid)), std::end(node.vid));
-        });
-      }
-    }
-
-
-  public: // Edit functions
-
-    // Find smallest node which contains the box by grid id description
-    morton_node_id_type FindSmallestNode(array<array<grid_id_type, nDimension>, 2> const& aidGrid) const noexcept
-    {
-      auto idLocationMin = base::MortonEncode(aidGrid[0]);
-      auto idLocationMax = base::MortonEncode(aidGrid[1]);
-
-      auto nDepth = this->m_nDepthMax;
-      for (auto flagDiffOfLocation = idLocationMin ^ idLocationMax; base::IsValidKey(flagDiffOfLocation); flagDiffOfLocation >>= nDimension, --nDepth)
-        idLocationMin >>= nDimension;
-
-      autoc itEnd = std::end(this->m_nodes);
-      for (auto kSmallestNode = this->GetHash(nDepth, idLocationMin); base::IsValidKey(kSmallestNode); kSmallestNode >>= nDimension)
-        if (this->m_nodes.find(kSmallestNode) != itEnd)
-          return kSmallestNode;
-
-      return morton_node_id_type{}; // Not found
-    }
-
-
-    // Find smallest node which contains the box
-    morton_node_id_type FindSmallestNode(box_type const& box) const noexcept
-    {
-      if (!AD::are_boxes_overlapped(this->m_box, box))
-        return morton_node_id_type{};
-
-      autoc aidGrid = this->getGridIdBox(box);
-      return FindSmallestNode(aidGrid);
-    }
-
-
-    // Insert item into a node. If fInsertToLeaf is true: The smallest node will be chosen by the max depth. If fInsertToLeaf is false: The smallest existing level on the branch will be chosen.
-    bool Insert(entity_id_type id, box_type const& box, bool fInsertToLeaf = false) noexcept
-    {
-      if (!AD::are_boxes_overlapped(this->m_box, box))
-        return false;
-
-      autoc kNodeSmallest = FindSmallestNode(box);
-      if (!base::IsValidKey(kNodeSmallest))
-        return false; // new box is not in the handled space domain
-
-      auto vLocation = vector<Location>(1);
-      setLocation(box, 0, vLocation);
-
-      for (autoc& loc : vLocation)
-      {
-        autoc kNode = this->GetHash(loc.depth, loc.idMin);
-        if (!this->template insert<nSplitStrategyAdditionalDepth == 0>(kNode, kNodeSmallest, id, fInsertToLeaf))
-          return false;
-      }
-
-      return true;
-    }
-
-  
-  private: 
-    bool doErase(morton_node_id_type_cref kNode, entity_id_type id) noexcept
-    {
-      auto& vid = cont_at(this->m_nodes, kNode).vid;
-      autoc itRemove = std::remove(begin(vid), end(vid), id);
-      if (itRemove == end(vid))
-        return false; // id was not registered previously.
-
-      vid.erase(itRemove, vid.end());
-      return true;
-    }
-
-
-    template<depth_type nDepthRemainSet>
-    bool doEraseRec(morton_node_id_type_cref kNode, entity_id_type id) noexcept
-    {
-      auto ret = this->doErase(kNode, id);
-      if constexpr (nDepthRemainSet > 0)
-      {
-        autoc& node = cont_at(this->m_nodes, kNode);
-        for (morton_node_id_type_cref kChild : node.GetChildren())
-          ret |= doEraseRec<nDepthRemainSet - 1>(kChild, id);
-      }
-      return ret;
-    }
-
-
-  public:
-    // Erase id, aided with the original bounding box
-    template<bool fReduceIds = true>
-    bool Erase(entity_id_type idErase, box_type const& box) noexcept
-    {
-      autoc kOld = FindSmallestNode(box);
-      if (!base::IsValidKey(kOld))
-        return false; // old box is not in the handled space domain
-
-      if (doEraseRec<nSplitStrategyAdditionalDepth>(kOld, idErase))
-      {
-        if constexpr (fReduceIds)
-          std::ranges::for_each(this->m_nodes, [&](auto& pairNode)
-          { 
-            for (auto& id : pairNode.second.vid)
-              id -= idErase < id;
-          });
-
-        return true;
-      }
-      else
-        return false;
-    }
-
-
-    // Erase an id. Traverse all node if it is needed, which has major performance penalty.
-    template<bool fReduceIds = true>
-    constexpr bool EraseId(entity_id_type idErase) noexcept
-    {
-      bool bErased = false;
-      if constexpr (nSplitStrategyAdditionalDepth == 0)
-        bErased = std::ranges::any_of(this->m_nodes, [&](auto& pairNode) { return erase(pairNode.second.vid, idErase); });
-      else
-        std::ranges::for_each(this->m_nodes, [&](auto& pairNode) { bErased |= erase(pairNode.second.vid, idErase) > 0; });
-
-      if (!bErased)
-        return false;
-
-      if constexpr (fReduceIds)
-        std::ranges::for_each(this->m_nodes, [&](auto& pairNode)
-        {
-          for (auto& id : pairNode.second.vid)
-            id -= idErase < id;
-        });
-
-      return true;
-    }
-
-
-    // Update id by the new bounding box information
-    bool Update(entity_id_type id, box_type const& boxNew, bool fInsertToLeaf = false) noexcept
-    {
-      if (!AD::are_boxes_overlapped(this->m_box, boxNew))
-        return false;
-
-      if (!this->EraseId<false>(id))
-        return false;
-
-      return this->Insert(id, boxNew, fInsertToLeaf);
-    }
-
-
-    // Update id by the new point information and the erase part is aided by the old bounding box geometry data
-    bool Update(entity_id_type id, box_type const& boxOld, box_type const& boxNew, bool fInsertToLeaf = false) noexcept
-    {
-      if (!AD::are_boxes_overlapped(this->m_box, boxNew))
-        return false;
-
-      if constexpr (nSplitStrategyAdditionalDepth == 0)
-        if (FindSmallestNode(boxOld) == FindSmallestNode(boxNew))
-          return true;
- 
-      if (!this->Erase<false>(id, boxOld))
-        return false; // id was not registered previously.
-
-      return this->Insert(id, boxNew, fInsertToLeaf);
-    }
-
-
-  private:
-
-    constexpr array<array<grid_id_type, nDimension>, 2> getGridIdPointEdge(vector_type const& point) const noexcept
-    {
-      autoc& p0 = AD::box_min_c(this->m_box);
-
-      auto aid = array<array<grid_id_type, nDimension>, 2>{};
-      for (dim_type iDimension = 0; iDimension < nDimension; ++iDimension)
-      {
-        autoc rid = static_cast<double>(adaptor_type::point_comp_c(point, iDimension) - adaptor_type::point_comp_c(p0, iDimension)) * this->m_aRasterizer[iDimension];
-        aid[0][iDimension] = aid[1][iDimension] = static_cast<grid_id_type>(rid);
-        aid[0][iDimension] -= (aid[0][iDimension] > 0) && (floor(rid) == rid);
-      }
-      return aid;
-    }
-
-
-    void pickSearch(vector_type const& ptPick, span<box_type const> const& vData, Node const& nodeParent, vector<entity_id_type>& vidFound) const noexcept
-    {
-      std::ranges::copy_if(nodeParent.vid, back_inserter(vidFound), [&](autoc id) { return AD::does_box_contain_point(vData[id], ptPick); });
-
-      for (morton_node_id_type_cref keyChild : nodeParent.GetChildren())
-      {
-        autoc& nodeChild = this->GetNode(keyChild);
-
-        if (!AD::does_box_contain_point(nodeChild.box, ptPick))
-          continue;
-
-        pickSearch(ptPick, vData, nodeChild, vidFound);
-      }
-    }
-
-
-  public: // Search functions
-    
-    // Pick search
-    vector<entity_id_type> PickSearch(vector_type const& ptPick, span<box_type const> const& vBox) const noexcept
-    {
-      auto vidFound = vector<entity_id_type>();
-      if (!AD::does_box_contain_point(this->m_box, ptPick))
-        return vidFound;
-
-      vidFound.reserve(100);
-
-      autoc itEnd = std::end(this->m_nodes);
-      autoc aid = this->getGridIdPointEdge(ptPick);
-      auto idLocation = base::MortonEncode(aid[0]);
-
-      auto kNode = this->GetHash(this->m_nDepthMax, idLocation);
-      if (aid[0] != aid[1]) // Pick point is on the nodes edge. It must check more nodes downward.
-      {
-        autoc idLocationMax = base::MortonEncode(aid[1]);
-        auto nDepth = this->m_nDepthMax;
-        for (auto flagDiffOfLocation = idLocation ^ idLocationMax; base::IsValidKey(flagDiffOfLocation); flagDiffOfLocation >>= nDimension, --nDepth)
-          idLocation >>= nDimension;
-
-        autoc keyRange = this->GetHash(nDepth, idLocation);
-        kNode = this->FindSmallestNodeKey(keyRange);
-        autoc itNode = this->m_nodes.find(kNode);
-        if (itNode != itEnd)
-          pickSearch(ptPick, vBox, itNode->second, vidFound);
-
-        kNode >>= nDimension;
-      }
-
-      for (; base::IsValidKey(kNode); kNode >>= nDimension)
-      {
-        autoc itNode = this->m_nodes.find(kNode);
-        if (itNode == itEnd)
-          continue;
-
-        std::ranges::copy_if(itNode->second.vid, back_inserter(vidFound), [&](autoc id) { return AD::does_box_contain_point(vBox[id], ptPick); });
-      }
-      
-      return vidFound;
-    }
-
-    
-    // Range search
-    template<bool isFullyContained = true>
-    vector<entity_id_type> RangeSearch(box_type const& range, span<box_type const> const& vBox) const noexcept
-    {
-      auto sidFound = vector<entity_id_type>();
-
-      if (!this->template rangeSearchRoot<box_type, isFullyContained, false, false, true>(range, vBox, sidFound))
-        return {};
-
-      if constexpr (nSplitStrategyAdditionalDepth > 0)
-      {
-        std::ranges::sort(sidFound);
-        autoc itEnd = std::unique(begin(sidFound), end(sidFound));
-        sidFound.erase(itEnd, std::end(sidFound));
-      }
-
-      return sidFound;
-    }
-
-
-    // Collision detection: Returns all overlapping boxes from the source trees.
-    static vector<std::pair<entity_id_type, entity_id_type>> CollisionDetection(OrthoTreeBoundingBox const& treeL, span<box_type const> const& vBoxL, OrthoTreeBoundingBox const& treeR, span<box_type const> const& vBoxR) noexcept
-    {
-      using NodeIterator = typename base::template container_type<Node>::const_iterator;
-      struct NodeIteratorAndStatus { NodeIterator it; bool fTraversed; };
-      using ParentIteratorArray = array<NodeIteratorAndStatus, 2>;
-
-      enum : bool { Left, Right };
-
-      auto vResult = vector<std::pair<entity_id_type, entity_id_type>>{};
-      vResult.reserve(vBoxL.size() / 10);
-
-      autoc kRoot = base::GetRootKey();
-      autoc aTree = array{ &treeL, &treeR };
-
-      auto q = queue<ParentIteratorArray>{};
-      for (q.push({ NodeIteratorAndStatus{ treeL.m_nodes.find(kRoot), false }, NodeIteratorAndStatus{ treeR.m_nodes.find(kRoot), false } }); !q.empty(); q.pop())
-      {
-        autoc& aitNodeParent = q.front();
-
-        // Check the current ascendant content 
-        {
-          for (autoc idL : aitNodeParent[Left].it->second.vid)
-            for (autoc idR : aitNodeParent[Right].it->second.vid)
-              if (AD::are_boxes_overlapped(vBoxL[idL], vBoxR[idR], false))
-                vResult.emplace_back(idL, idR);
-        }
-
-        // Collect children
-        auto avitChildNode = array<vector<NodeIteratorAndStatus>, 2>{};
-        for (autoc id : { Left, Right })
-        {
-          autoc& [itNode, fTraversed] = aitNodeParent[id];
-          if (fTraversed)
-            continue;
-          
-          autoc vidChild = itNode->second.GetChildren();
-          avitChildNode[id].resize(vidChild.size());
-          std::ranges::transform(vidChild, begin(avitChildNode[id]), [&](morton_node_id_type_cref kChild) -> NodeIteratorAndStatus
-          {
-            return { aTree[id]->m_nodes.find(kChild), false };
-          });
-        }
-
-        // Stop condition
-        if (avitChildNode[0].empty() && avitChildNode[1].empty())
-          continue;
-
-        // Add parent if it has any element
-        for (autoc id : { Left, Right })
-          if (!aitNodeParent[id].it->second.vid.empty())
-            avitChildNode[id].push_back({ aitNodeParent[id].it, true });
-
-        // Cartesian product of avitChildNode left and right
-        for (autoc& itNodeChildL : avitChildNode[Left])
-          for (autoc& itNodeChildR : avitChildNode[Right])
-            if (!(itNodeChildL.it == aitNodeParent[Left].it && itNodeChildR.it == aitNodeParent[Right].it))
-              if (AD::are_boxes_overlapped(itNodeChildL.it->second.box, itNodeChildR.it->second.box, false))
-                q.emplace(array{ itNodeChildL, itNodeChildR });
-      }
-
-      if constexpr (nSplitStrategyAdditionalDepth > 0)
-      {
-        std::ranges::sort(vResult);
-        vResult.erase(std::unique(std::begin(vResult), std::end(vResult)), end(vResult));
-      }
-
-      return vResult;
-    }
-
-
-    // Collision detection: Returns all overlapping boxes from the source trees.
-    vector<std::pair<entity_id_type, entity_id_type>> CollisionDetection(span<box_type const> const& vBox, OrthoTreeBoundingBox const& treeOther, span<box_type const> const& vBoxOther) const noexcept
-    {
-      return CollisionDetection(*this, vBox, treeOther, vBoxOther);
-    }
-
-  public:
-    // Collision detection between the stored elements from top to bottom logic
-    template<typename execution_policy_type = std::execution::unsequenced_policy>
-    vector<std::pair<entity_id_type, entity_id_type>> CollisionDetectionObsolete(span<box_type const> const& vBox) const noexcept
-    {
-      autoc nEntity = vBox.size();
-
-      auto vidCheck = vector<entity_id_type>(nEntity);
-      std::iota(std::begin(vidCheck), std::end(vidCheck), 0);
-
-      auto vvidCollision = vector<vector<entity_id_type>>(vidCheck.size());
-      auto ep = execution_policy_type{}; // GCC 11.3
-      std::transform(ep, std::begin(vidCheck), std::end(vidCheck), std::begin(vvidCollision), [&vBox, this](autoc idCheck) -> vector<entity_id_type>
-      {
-        auto sidFound = vector<entity_id_type>();
-
-        autoc nEntity = vBox.size();
-        if (!this->template rangeSearchRoot<box_type, false, true, false, true>(vBox[idCheck], vBox, sidFound, idCheck))
-          return {};
-
-        if constexpr (nSplitStrategyAdditionalDepth > 0)
-        {
-          std::ranges::sort(sidFound);
-          autoc itEnd = std::unique(std::begin(sidFound), std::end(sidFound));
-          sidFound.erase(itEnd, std::end(sidFound));
-        }
-
-        return sidFound;
-      });
-
-      auto vPair = vector<std::pair<entity_id_type, entity_id_type>>{};
-      if (nEntity > 10)
-        vPair.reserve(nEntity / 10);
-
-      for (autoc idCheck : vidCheck)
-        for (autoc idCollide : vvidCollision[idCheck])
-          vPair.emplace_back(idCheck, idCollide);
-
-      return vPair;
-    }
-
-  public:
-    // Collision detection between the stored elements from bottom to top logic
-    template<typename execution_policy_type = std::execution::unsequenced_policy>
-    vector<std::pair<entity_id_type, entity_id_type>> CollisionDetection(span<box_type const> const& vBox) const noexcept
-    {
-      using CollisionDetectionContainer = vector<std::pair<entity_id_type, entity_id_type>>;
-
-      autoc nEntity = vBox.size();
-      auto vidCollision = CollisionDetectionContainer();
-      vidCollision.reserve(vBox.size());
-
-
-      // nSplitStrategyAdditionalDepth version of this algorithm needs a reverse map
-      auto vReverseMap = vector<vector<morton_node_id_type>>(nEntity);
-      if constexpr (nSplitStrategyAdditionalDepth > 0)
-      {
-        std::for_each(std::begin(this->m_nodes), std::end(this->m_nodes), [&vReverseMap](autoc& pairKeyNode)
-        {
-          autoc& [kNode, node] = pairKeyNode;
-          for (autoc& id : node.vid)
-            vReverseMap[id].emplace_back(kNode);
-        });
-
-        auto ep = execution_policy_type{}; // GCC 11.3
-        std::for_each(ep, std::begin(vReverseMap), std::end(vReverseMap), [](auto& vKey)
-        {
-          if constexpr (base::is_linear_tree)
-            std::ranges::sort(vKey);
-          else
-            std::ranges::sort(vKey, bitset_arithmetic_compare{});
-
-        });
-      }
-
-
-      // Entities which contain all of the tree could slow the algorithm, so these are eliminated
-      auto vidDepth0 = vector<entity_id_type>();
-      {
-        autoc& nodeRoot = this->GetNode(this->GetRootKey());
-        for (autoc idEntity : nodeRoot.vid)
-        {
-          if (AD::are_boxes_overlapped(vBox[idEntity], this->m_box))
-          {
-            for (auto idEntityOther = idEntity + 1; idEntityOther < nEntity; ++idEntityOther)
-              vidCollision.emplace_back(idEntity, idEntityOther);
-          }
-          else
-            vidDepth0.emplace_back(idEntity);
-        }
-      }
-
-      auto ep = execution_policy_type{}; // GCC 11.3
-
-      // Collision detection node-by-node without duplication
-      auto vvidCollisionByNode = vector<CollisionDetectionContainer>(this->m_nodes.size());
-      std::transform(ep, std::begin(this->m_nodes), std::end(this->m_nodes), std::begin(vvidCollisionByNode), [&vBox, &vReverseMap, &vidDepth0, this](autoc& pairKeyNode) -> CollisionDetectionContainer
-      {
-        auto aidPair = CollisionDetectionContainer{};
-        autoc& [keyNode, node] = pairKeyNode;
-
-        autoc nDepthNode = this->GetDepth(keyNode);
-
-        autoc pvid = nDepthNode == 0 ? &vidDepth0 : &node.vid;
-        autoc& vid = *pvid;
-        autoc nEntityNode = vid.size();
-
-        aidPair.reserve(nEntityNode);
-
-        // Collision detection with the parents
-        if (nDepthNode > 0)
-        {
-          auto idDepthParent = nDepthNode - 1;
-          auto idDepthDiff = depth_type(1);
-          for (auto keyParent = keyNode >> nDimension; base::IsValidKey(keyParent); keyParent >>= nDimension, --idDepthParent, ++idDepthDiff)
-          {
-            autoc pvidParent = idDepthParent == 0 ? &vidDepth0 : &this->GetNode(keyParent).vid;
-
-            if constexpr (nSplitStrategyAdditionalDepth == 0)
-            {
-              for (autoc iEntityNode : vid)
-                for (autoc iEntityParent : *pvidParent)
-                  if (AD::are_boxes_overlapped_strict(vBox[iEntityNode], vBox[iEntityParent]))
-                    aidPair.emplace_back(iEntityNode, iEntityParent);
-            }
-            else
-            {
-              // nSplitStrategyAdditionalDepth: idEntity could occur in multiple node. This algorithm aims to check only the first occurrence's parents.
-
-              auto vidCheckUp = vector<entity_id_type>{};
-              vidCheckUp.reserve(nEntityNode);
-              auto vidPairFromOtherBranch = unordered_map<entity_id_type, set<entity_id_type>>{};
-              for (size_t iEntity = 0; iEntity < nEntityNode; ++iEntity)
-              {
-                autoc& vKeyEntity = vReverseMap[vid[iEntity]];
-                autoc nKeyEntity = vKeyEntity.size();
-                if (nKeyEntity == 1)
-                  vidCheckUp.emplace_back(vid[iEntity]);
-                else
-                {
-                  if (vKeyEntity[0] == keyNode)
-                    vidCheckUp.emplace_back(vid[iEntity]);
-                  else if (idDepthDiff <= nSplitStrategyAdditionalDepth)
-                  {
-                    auto vKeyEntitySameDepth = vector<morton_node_id_type>();
-                    for (size_t iKeyEntity = 1; iKeyEntity < nKeyEntity; ++iKeyEntity)
-                    {
-                      // An earlier node is already check this level
-                      {
-                        auto& keyEntitySameDepth = vKeyEntitySameDepth.emplace_back(vKeyEntity[iKeyEntity - 1]);
-                        autoc nDepthPrev = this->GetDepth(keyEntitySameDepth);
-                        if (nDepthPrev > idDepthParent)
-                          keyEntitySameDepth >>= nDimension * (nDepthPrev - idDepthParent);
-
-                        if (keyEntitySameDepth == keyParent)
-                          break;
-                      }
-
-                      if (vKeyEntity[iKeyEntity] != keyNode)
-                        continue;
-
-                      // On other branch splitted boxes could conflict already
-                      for (autoc iEntityParent : *pvidParent)
-                      {
-                        autoc& vKeyEntityParent = vReverseMap[iEntityParent];
-                        autoc nKeyEntityParent = vKeyEntityParent.size();
-
-                        for (size_t iKeyEntityPrev = 0, iKeyEntityParent = 0; iKeyEntityPrev < iKeyEntity && iKeyEntityParent < nKeyEntityParent;)
-                        {
-                          if (vKeyEntityParent[iKeyEntityParent] == vKeyEntity[iKeyEntityPrev] || (vKeyEntityParent[iKeyEntityParent] == vKeyEntitySameDepth[iKeyEntityPrev]))
-                          {
-                            // Found a common an earlier common key
-                            vidPairFromOtherBranch[vid[iEntity]].emplace(iEntityParent);
-                            break;
-                          }
-                          else if (vKeyEntityParent[iKeyEntityParent] < vKeyEntity[iKeyEntityPrev])
-                            ++iKeyEntityParent;
-                          else
-                            ++iKeyEntityPrev;
-                        }
-                      }
-
-                      vidCheckUp.emplace_back(vid[iEntity]);
-                      break;
-                    }
-                  }
-                }
-              }
-
-              if (vidPairFromOtherBranch.empty())
-              {
-                for (autoc iEntityNode : vidCheckUp)
-                  for (autoc iEntityParent : *pvidParent)
-                    if (AD::are_boxes_overlapped_strict(vBox[iEntityNode], vBox[iEntityParent]))
-                      aidPair.emplace_back(iEntityNode, iEntityParent);
-              }
-              else
-              {
-                for (autoc iEntityNode : vidCheckUp)
-                {
-                  autoc it = vidPairFromOtherBranch.find(iEntityNode);
-                  autoc fThereAreFromOtherBranch = it != vidPairFromOtherBranch.end();
-
-                  for (autoc iEntityParent : *pvidParent)
-                  {
-                    autoc fAlreadyContainted = fThereAreFromOtherBranch && it->second.contains(iEntityParent);
-                    if (!fAlreadyContainted && AD::are_boxes_overlapped_strict(vBox[iEntityNode], vBox[iEntityParent]))
-                      aidPair.emplace_back(iEntityNode, iEntityParent);
-                  }
-                }
-              }
-            }
-          }
-        }
-
-
-        // Node inside collision detection
-        if (nEntityNode > 1)
-        {
-          for (size_t iEntity = 0; iEntity < nEntityNode; ++iEntity)
-          {
-            autoc iEntityNode = vid[iEntity];
-            autoc& vKeyEntity = vReverseMap[iEntityNode];
-            autoc nKeyEntity = vKeyEntity.size();
-
-            for (size_t jEntity = iEntity + 1; jEntity < nEntityNode; ++jEntity)
-            {
-              if constexpr (nSplitStrategyAdditionalDepth == 0)
-              {
-                if (AD::are_boxes_overlapped_strict(vBox[iEntityNode], vBox[vid[jEntity]]))
-                  aidPair.emplace_back(iEntityNode, vid[jEntity]);
-              }
-              else
-              {
-                // Same entities could collide in other nodes, but only the first occurrence should be checked
-                autoc& vKeyEntityJ = vReverseMap[vid[jEntity]];
-                auto bIsTheFirstCollisionCheck = nKeyEntity == 1 || vKeyEntityJ.size() == 1;
-                if (!bIsTheFirstCollisionCheck)
-                {
-                  for (size_t iKeyEntity = 0, jKeyEntity = 0; iKeyEntity < nKeyEntity; )
-                  {
-                    if      (vKeyEntityJ[jKeyEntity] == vKeyEntity[iKeyEntity]) { bIsTheFirstCollisionCheck = keyNode == vKeyEntity[iKeyEntity]; break; }
-                    else if (vKeyEntityJ[jKeyEntity] < vKeyEntity[iKeyEntity])  ++jKeyEntity;
-                    else                                                        ++iKeyEntity;
-                  }
-                }
-
-                if (bIsTheFirstCollisionCheck)
-                  if (AD::are_boxes_overlapped_strict(vBox[iEntityNode], vBox[vid[jEntity]]))
-                    aidPair.emplace_back(iEntityNode, vid[jEntity]);
-              }
-            }
-          }
-        }
-
-        return aidPair;
-      });
-
-      for (autoc& vidCollisionNode : vvidCollisionByNode)
-        vidCollision.insert(vidCollision.end(), vidCollisionNode.begin(), vidCollisionNode.end());
-      
-      return vidCollision;
-    }
-
-
-
-  private:
-    void getRayIntersectedAll(Node const& node, span<box_type const> const& vBox, vector_type const& rayBase, vector_type const& rayHeading, geometry_type tolerance, geometry_type rMaxDistance, vector<EntityDistance>& vdidOut) const noexcept
-    {
-      autoc oIsHit = AD::is_ray_hit(node.box, rayBase, rayHeading, tolerance);
-      if (!oIsHit)
-        return;
-
-      for (autoc id : node.vid)
-      {
-        autoc oDist = AD::is_ray_hit(vBox[id], rayBase, rayHeading, tolerance);
-        if (oDist && (rMaxDistance == 0 || oDist.value() <= rMaxDistance))
-          vdidOut.push_back({ { oDist.value() }, id });
-      }
-
-      for (autoc kChild : node.GetChildren())
-        getRayIntersectedAll(cont_at(this->m_nodes, kChild), vBox, rayBase, rayHeading, tolerance, rMaxDistance, vdidOut);
-    }
-
-
-    void getRayIntersectedFirst(Node const& node, span<box_type const> const& vBox, vector_type const& rayBase, vector_type const& rayHeading, geometry_type tolerance, multiset<EntityDistance>& vidOut) const noexcept
-    {
-      autoc rLastDistance = vidOut.empty() ? std::numeric_limits<double>::infinity() : static_cast<double>(vidOut.rbegin()->distance);
-      for (autoc id : node.vid)
-      {
-        autoc oDist = AD::is_ray_hit(vBox[id], rayBase, rayHeading, tolerance);
-        if (!oDist)
-          continue;
-
-        if (*oDist > rLastDistance)
-          continue;
-
-        vidOut.insert({ { *oDist }, id });
-      }
-
-      auto msNode = multiset<BoxDistance>();
-      for (autoc kChild : node.GetChildren())
-      {
-        autoc& nodeChild = cont_at(this->m_nodes, kChild);
-        autoc oDist = AD::is_ray_hit(nodeChild.box, rayBase, rayHeading, tolerance);
-        if (!oDist)
-          continue;
-
-        if (*oDist > rLastDistance)
-          continue;
-
-        msNode.insert({ { static_cast<geometry_type>(oDist.value()) }, kChild, nodeChild });
-      }
-
-      for (autoc& nodeData : msNode)
-        getRayIntersectedFirst(nodeData.node, vBox, rayBase, rayHeading, tolerance, vidOut);
-
-    }
-
-
-  public:
-
-    // Get all box which is intersected by the ray in order
-    vector<entity_id_type> RayIntersectedAll(vector_type const& rayBasePoint, vector_type const& rayHeading, span<box_type const> const& vBox, geometry_type tolerance, geometry_type rMaxDistance = 0) const noexcept
-    {
-      auto vdid = vector<EntityDistance>();
-      vdid.reserve(20);
-      getRayIntersectedAll(cont_at(this->m_nodes, base::GetRootKey()), vBox, rayBasePoint, rayHeading, tolerance, rMaxDistance, vdid);
-
-      autoc itBegin = std::begin(vdid);
-      auto itEnd = std::end(vdid);
-      std::sort(itBegin, itEnd);
-      if constexpr (nSplitStrategyAdditionalDepth > 0)
-        itEnd = std::unique(itBegin, itEnd, [](autoc& lhs, autoc& rhs) { return lhs.id == rhs.id; });
-
-      auto vid = vector<entity_id_type>(std::distance(itBegin, itEnd));
-      std::transform(itBegin, itEnd, std::begin(vid), [](autoc& did) { return did.id; });
-      return vid;
-    }
-
-
-    // Get first box which is intersected by the ray
-    std::optional<entity_id_type> RayIntersectedFirst(vector_type const& rayBase, vector_type const& rayHeading, span<box_type const> const& vBox, geometry_type tolerance) const noexcept
-    {
-      autoc& node = cont_at(this->m_nodes, base::GetRootKey());
-      autoc oDist = AD::is_ray_hit(node.box, rayBase, rayHeading, tolerance);
-      if (!oDist)
-        return std::nullopt;
-
-      auto vid = multiset<EntityDistance>();
-      getRayIntersectedFirst(node, vBox, rayBase, rayHeading, tolerance, vid);
-      if (vid.empty())
-        return std::nullopt;
-
-      return std::begin(vid)->id;
-    }
-  };
-
-
   template<dim_type nDimension, typename geometry_type = double>
   using PointND = array<geometry_type, nDimension>;
 
@@ -3128,35 +2156,35 @@ namespace OrthoTree
 
   template<size_t nDimension> using TreePointND = OrthoTree::OrthoTreePoint<nDimension, OrthoTree::PointND<nDimension>, OrthoTree::BoundingBoxND<nDimension>>;
   template<size_t nDimension, uint32_t nSplitStrategyAdditionalDepth = 2> 
-  using TreeBoxND = OrthoTree::OrthoTreeBoundingBox<nDimension, OrthoTree::PointND<nDimension>, OrthoTree::BoundingBoxND<nDimension>, AdaptorGeneral<nDimension, OrthoTree::PointND<nDimension>, OrthoTree::BoundingBoxND<nDimension>>, double, nSplitStrategyAdditionalDepth>;
+  //using TreeBoxND = OrthoTree::OrthoTreeBoundingBox<nDimension, OrthoTree::PointND<nDimension>, OrthoTree::BoundingBoxND<nDimension>, AdaptorGeneral<nDimension, OrthoTree::PointND<nDimension>, OrthoTree::BoundingBoxND<nDimension>>, double, nSplitStrategyAdditionalDepth>;
 
   // Dualtree for points
   using DualtreePoint = TreePointND<1>;
 
   // Dualtree for bounding boxes
-  using DualtreeBox = TreeBoxND<1>;
+  //using DualtreeBox = TreeBoxND<1>;
 
   // Quadtree for points
   using QuadtreePoint = TreePointND<2>;
 
   // Quadtree for bounding boxes
-  using QuadtreeBox = TreeBoxND<2>;
+  //using QuadtreeBox = TreeBoxND<2>;
 
   // Octree for points
   using OctreePoint = TreePointND<3>;
 
   // Octree for bounding boxes
-  using OctreeBox = TreeBoxND<3>;
+  //using OctreeBox = TreeBoxND<3>;
 
   // Hexatree for points
   using HexatreePoint = TreePointND<4>;
 
   // Hexatree for bounding boxes
-  using HexatreeBox = TreeBoxND<4>;
+  //using HexatreeBox = TreeBoxND<4>;
 
   // NTrees for higher dimensions
   using TreePoint16D = TreePointND<16>;
-  using TreeBox16D = TreeBoxND<16>;
+  //using TreeBox16D = TreeBoxND<16>;
 }
 
 

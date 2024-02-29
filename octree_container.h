@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2021 Attila Csikós
+Copyright (c) 2021 Attila Csikï¿½s
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -281,26 +281,26 @@ namespace OrthoTree
   template<dim_type N>
   using TreePointContainerND = OrthoTreeContainerPoint<TreePointND<N>, PointND<N>>;
 
-  template<dim_type N, uint32_t nSplitStrategyAdditionalDepth = 2>
-  using TreeBoxContainerND = OrthoTreeContainerBox<TreeBoxND<N, nSplitStrategyAdditionalDepth>, BoundingBoxND<N>>;
+  //template<dim_type N, uint32_t nSplitStrategyAdditionalDepth = 2>
+  //using TreeBoxContainerND = OrthoTreeContainerBox<TreeBoxND<N, nSplitStrategyAdditionalDepth>, BoundingBoxND<N>>;
 
   // Dualtree for points
   using DualtreePointC = TreePointContainerND<1>;
 
   // Dualtree for bounding boxes
-  using DualtreeBoxC = TreeBoxContainerND<1>;
+  //using DualtreeBoxC = TreeBoxContainerND<1>;
 
   // Quadtree for points
   using QuadtreePointC = TreePointContainerND<2>;
 
   // Quadtree for bounding boxes
-  using QuadtreeBoxC = TreeBoxContainerND<2>;
+  //using QuadtreeBoxC = TreeBoxContainerND<2>;
 
   // Octree for points
   using OctreePointC = TreePointContainerND<3>;
 
   // Octree for bounding boxes
-  using OctreeBoxC = TreeBoxContainerND<3>;
+  //using OctreeBoxC = TreeBoxContainerND<3>;
 
 }
 #endif // ORTHOTREE_CONTAINER_GUARD
