@@ -28,7 +28,7 @@ SOFTWARE.
 #include <algorithm>
 #include <climits>
 #include <concepts>
-#include <execution>
+//#include <execution>
 #include <functional>
 #include <iterator>
 #include <numeric>
@@ -48,6 +48,8 @@ SOFTWARE.
 
 #include <assert.h>
 #include <math.h>
+
+
 
 #ifndef autoc
 #define autoc auto const
@@ -1463,11 +1465,11 @@ namespace OrthoTree
 
 
     // Move the whole tree with a vector of the movement
-    template<typename execution_policy_type = std::execution::unsequenced_policy>
+    //template<typename execution_policy_type = std::execution::unsequenced_policy>
     void Move(vector_type const& vMove) noexcept
     {
-      auto ep = execution_policy_type{}; // GCC 11.3
-      std::for_each(ep, std::begin(m_nodes), std::end(m_nodes), [&vMove](auto& pairKeyNode)
+      //auto ep = execution_policy_type{}; // GCC 11.3
+      std::for_each(/*ep,*/ std::begin(m_nodes), std::end(m_nodes), [&vMove](auto& pairKeyNode)
       {
         AD::move_box(pairKeyNode.second.box, vMove);
       });
@@ -1753,7 +1755,7 @@ namespace OrthoTree
     }
 
     // Create
-    template<typename execution_policy_type = std::execution::unsequenced_policy>
+    //template<typename execution_policy_type = std::execution::unsequenced_policy>
     static void Create(OrthoTreePoint& tree, span<vector_type const> const& vpt, depth_type nDepthMaxIn = 0, std::optional<box_type> const& oBoxSpace = std::nullopt, max_element_type nElementMaxInNode = max_element_default) noexcept
     {
       autoc boxSpace = oBoxSpace.has_value() ? *oBoxSpace : AD::box_of_points(vpt);
@@ -1773,14 +1775,14 @@ namespace OrthoTree
       autoc vidPoint = base::generatePointId(n);
       auto aidLocation = vector<std::pair<entity_id_type, morton_grid_id_type>>(n);
 
-      auto ept = execution_policy_type{}; // GCC 11.3 only accept in this form
-      std::transform(ept, vpt.begin(), vpt.end(), vidPoint.begin(), aidLocation.begin(), [&](autoc& pt, autoc id) -> std::pair<entity_id_type, morton_grid_id_type>
+      //auto ept = execution_policy_type{}; // GCC 11.3 only accept in this form
+      std::transform(/*ept,*/ vpt.begin(), vpt.end(), vidPoint.begin(), aidLocation.begin(), [&](autoc& pt, autoc id) -> std::pair<entity_id_type, morton_grid_id_type>
       {
         return { id, tree.getLocationId(pt) };
       });
 
-      auto eps = execution_policy_type{}; // GCC 11.3 only accept in this form
-      std::sort(eps, std::begin(aidLocation), std::end(aidLocation), [&](autoc& idL, autoc& idR) { return idL.second < idR.second; });
+      //auto eps = execution_policy_type{}; // GCC 11.3 only accept in this form
+      std::sort(/*eps,*/ std::begin(aidLocation), std::end(aidLocation), [&](autoc& idL, autoc& idR) { return idL.second < idR.second; });
       auto itBegin = std::begin(aidLocation);
       tree.addNodes(nodeRoot, kRoot, itBegin, std::end(aidLocation), morton_node_id_type{ 0 }, nDepthMax);
     }

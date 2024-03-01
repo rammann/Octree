@@ -45,26 +45,32 @@ namespace OrthoTree
 
   protected:
     OrthoTree m_tree;
-    vector<data_type> m_vData;
+    std::vector<data_type> m_vData;
 
   public: // Constructors
     OrthoTreeContainerBase() noexcept = default;
     OrthoTreeContainerBase(span<data_type const> const& vData, depth_type nDepthMax = 0, std::optional<box_type> const& oBoxSpace = std::nullopt, max_element_type nElementMaxInNode = OrthoTree::max_element_default, bool fParallelCreate = false) noexcept
       : m_vData(vData.begin(), vData.end())
     {
+      OrthoTree::Create(m_tree, vData, nDepthMax, oBoxSpace, nElementMaxInNode);
+      /*
       if (fParallelCreate)
-        OrthoTree::template Create<std::execution::parallel_unsequenced_policy>(m_tree, vData, nDepthMax, oBoxSpace, nElementMaxInNode);
+        //OrthoTree::template Create<std::execution::parallel_unsequenced_policy>(m_tree, vData, nDepthMax, oBoxSpace, nElementMaxInNode);
       else
         OrthoTree::Create(m_tree, vData, nDepthMax, oBoxSpace, nElementMaxInNode);
+      */
     }
 
     OrthoTreeContainerBase(vector<data_type>&& vData, depth_type nDepthMax = 0, std::optional<box_type> const& oBoxSpace = std::nullopt, max_element_type nElementMaxInNode = OrthoTree::max_element_default, bool fParallelCreate = false) noexcept
       : m_vData(vData)
     {
+      OrthoTree::Create(m_tree, m_vData, nDepthMax, oBoxSpace, nElementMaxInNode);
+      /*
       if (fParallelCreate)
-        OrthoTree::template Create<std::execution::parallel_unsequenced_policy>(m_tree, m_vData, nDepthMax, oBoxSpace, nElementMaxInNode);
+        //OrthoTree::template Create<std::execution::parallel_unsequenced_policy>(m_tree, m_vData, nDepthMax, oBoxSpace, nElementMaxInNode);
       else
         OrthoTree::Create(m_tree, m_vData, nDepthMax, oBoxSpace, nElementMaxInNode);
+      */
     }
 
 
@@ -135,30 +141,30 @@ namespace OrthoTree
 
   public: // Edit functions
 
-    template<typename execution_policy_type = std::execution::unsequenced_policy>
+    //template<typename execution_policy_type = std::execution::unsequenced_policy>
     static OrthoTreeContainerPoint Create(span<data_type const> const& vData, depth_type nDepthMax = 0, std::optional<box_type> const& oBoxSpace = std::nullopt, max_element_type nElementMaxInNode = OrthoTree::max_element_default) noexcept
     {
       auto otc = OrthoTreeContainerPoint();
       otc.m_vData = vector(vData.begin(), vData.end());
-      OrthoTree::template Create<execution_policy_type>(otc.m_tree, vData, nDepthMax, oBoxSpace, nElementMaxInNode);
+      OrthoTree::template Create/*<execution_policy_type>*/(otc.m_tree, vData, nDepthMax, oBoxSpace, nElementMaxInNode);
       return otc;
     }
 
-    template<typename execution_policy_type = std::execution::unsequenced_policy>
+    //template<typename execution_policy_type = std::execution::unsequenced_policy>
     static OrthoTreeContainerPoint Create(vector<data_type>&& vData, depth_type nDepthMax = 0, std::optional<box_type> const& oBoxSpace = std::nullopt, max_element_type nElementMaxInNode = OrthoTree::max_element_default) noexcept
     {
       auto otc = OrthoTreeContainerPoint();
       otc.m_vData = std::move(vData);
-      OrthoTree::template Create<execution_policy_type>(otc.m_tree, otc.m_vData, nDepthMax, oBoxSpace, nElementMaxInNode);
+      OrthoTree::template Create/*<execution_policy_type>*/(otc.m_tree, otc.m_vData, nDepthMax, oBoxSpace, nElementMaxInNode);
       return otc;
     }
 
-    template<typename execution_policy_type = std::execution::unsequenced_policy>
+    //template<typename execution_policy_type = std::execution::unsequenced_policy>
     void Move(vector_type const& vMove) noexcept
     {
-      this->m_tree.template Move<execution_policy_type>(vMove);
-      auto ep = execution_policy_type{}; // GCC 11.3
-      std::for_each(ep, std::begin(this->m_vData), std::end(this->m_vData), [&vMove](auto& pt) { pt = AD::add(pt, vMove); });
+      this->m_tree.template Move/*<execution_policy_type>*/(vMove);
+      //auto ep = execution_policy_type{}; // GCC 11.3
+      std::for_each(/*ep,*/ std::begin(this->m_vData), std::end(this->m_vData), [&vMove](auto& pt) { pt = AD::add(pt, vMove); });
     }
 
 
@@ -179,104 +185,7 @@ namespace OrthoTree
   };
 
 
-  // General OrthoTree container for box types
-  template<typename OrthoTree, typename data_type>
-  class OrthoTreeContainerBox : public OrthoTreeContainerBase<OrthoTree, data_type>
-  {
-  public:
-    using base = OrthoTreeContainerBase<OrthoTree, data_type>;
-    using AD = typename base::AD;
-    using geometry_type = typename base::geometry_type;
-    using vector_type = typename base::vector_type;
-    using box_type = typename base::box_type;
-    using max_element_type = typename OrthoTree::max_element_type;
-
-    using base::base; // inherits all constructors
-
-  public: // Edit functions
-
-    template<typename execution_policy_type = std::execution::unsequenced_policy>
-    static OrthoTreeContainerBox Create(span<data_type const> const& vData, depth_type nDepthMax = 0, std::optional<box_type> const& oBoxSpace = std::nullopt, max_element_type nElementMaxInNode = OrthoTree::max_element_default) noexcept
-    {
-      auto otc = OrthoTreeContainerBox();
-      otc.m_vData = vector(vData.begin(), vData.end());
-      OrthoTree::template Create<execution_policy_type>(otc.m_tree, vData, nDepthMax, oBoxSpace, nElementMaxInNode);
-      return otc;
-    }
-
-    template<typename execution_policy_type = std::execution::unsequenced_policy>
-    static OrthoTreeContainerBox Create(vector<data_type>&& vData, depth_type nDepthMax = 0, std::optional<box_type> const& oBoxSpace = std::nullopt, max_element_type nElementMaxInNode = OrthoTree::max_element_default) noexcept
-    {
-      auto otc = OrthoTreeContainerBox();
-      otc.m_vData = std::move(vData);
-      OrthoTree::template Create<execution_policy_type>(otc.m_tree, otc.m_vData, nDepthMax, oBoxSpace, nElementMaxInNode);
-      return otc;
-    }
-
-    template<typename execution_policy_type = std::execution::unsequenced_policy>
-    void Move(vector_type const& vMove) noexcept
-    {
-      this->m_tree.template Move<execution_policy_type>(vMove);
-      auto ep = execution_policy_type{}; // GCC 11.3
-      std::for_each(ep, std::begin(this->m_vData), std::end(this->m_vData), [&vMove](auto& box)
-      {
-        AD::move_box(box, vMove);
-      });
-    }
-
-
-  public: // Search functions
-
-    // Pick search
-    inline vector<entity_id_type> PickSearch(vector_type const& ptPick) const noexcept
-    {
-      return this->m_tree.PickSearch(ptPick, this->m_vData);
-    }
-
-    // Range search
-    template<bool isFullyContained = true>
-    inline vector<entity_id_type> RangeSearch(box_type const& range) const noexcept
-    {
-      return this->m_tree.template RangeSearch<isFullyContained>(range, this->m_vData);
-    }
-
-
-  public: // Collision detection
-
-    // Collision detection between the contained elements
-    template<typename execution_policy_type = std::execution::unsequenced_policy>
-    inline vector<std::pair<entity_id_type, entity_id_type>> CollisionDetection() const noexcept
-    {
-      return this->m_tree.template CollisionDetection<execution_policy_type>(this->m_vData);
-    }
-
-    // Collision detection with another tree
-    inline vector<std::pair<entity_id_type, entity_id_type>> CollisionDetection(OrthoTreeContainerBox const& treeOther) const noexcept
-    {
-      return this->m_tree.CollisionDetection(this->m_tree, this->m_vData, treeOther.m_tree, treeOther.m_vData);
-    }
-
-    // Collision detection between trees
-    static inline vector<std::pair<entity_id_type, entity_id_type>> CollisionDetection(OrthoTreeContainerBox const& treeL, OrthoTreeContainerBox const& treeR) noexcept
-    {
-      return treeL.CollisionDetection(treeR);
-    }
-
-
-  public: // Ray intersection
-
-    // Get all box which is intersected by the ray in order
-    inline vector<entity_id_type> RayIntersectedAll(vector_type const& rayBasePoint, vector_type const& rayHeading, geometry_type tolerance, geometry_type rMaxDistance = std::numeric_limits<geometry_type>::max()) const noexcept
-    {
-      return this->m_tree.RayIntersectedAll(rayBasePoint, rayHeading, this->m_vData, tolerance, rMaxDistance);
-    }
-
-    // Get first box which is intersected by the ray
-    inline std::optional<entity_id_type> RayIntersectedFirst(vector_type const& rayBasePoint, vector_type const& rayHeading, geometry_type tolerance) const noexcept
-    {
-      return this->m_tree.RayIntersectedFirst(rayBasePoint, rayHeading, this->m_vData, tolerance);
-    }
-  };
+  
 
   template<dim_type N>
   using TreePointContainerND = OrthoTreeContainerPoint<TreePointND<N>, PointND<N>>;
